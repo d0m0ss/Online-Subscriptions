@@ -1,0 +1,65 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:14.4-alpine
+    container_name: subscriptions_db
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      POSTGRES_DB: ${DB_NAME:-subscriptions}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-subscriptions} -h localhost -p 5432"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - subscriptions_network
+
+  migrate:
+    image: migrate/migrate:latest
+    container_name: subscriptions_migrate
+    command: [
+      "-path=/migrations",
+      "-database",
+      "postgres://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@db:5432/${DB_NAME:-subscriptions}?sslmode=disable",
+      "up"
+    ]
+    volumes:
+      - ./internal/infra/migrations:/migrations:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - subscriptions_network
+    restart: "no"
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: subscriptions_app
+    volumes:
+      - ./.env:/app/.env:ro
+    ports:
+      - "${APP_PORT:-8093}:8093"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - subscriptions_network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+
+networks:
+  subscriptions_network:
+    driver: bridge
+    # external: true
